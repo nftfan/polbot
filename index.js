@@ -2,9 +2,10 @@ const TelegramBot = require('node-telegram-bot-api');
 const Web3 = require('web3');
 
 // --- CONFIG ---
-const BOT_TOKEN = '8206583869';
+const BOT_TOKEN = '8206583869:AAHg-L0Atf_Y5zEI8DNfNdR7KIcJfDoDs94';
 const POLYGON_RPC = 'https://polygon-rpc.com/';
 const NFTFAN_TOKEN_ADDRESS = '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
+
 
 // --- SETUP WEB3 ---
 const web3 = new Web3(POLYGON_RPC);
