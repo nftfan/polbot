@@ -81,19 +81,29 @@ async function getBalances(walletAddress) {
   }
 }
 
-function extractWallets(text) {
+function extractEvmWallets(text) {
   const regex = /\b0x[a-fA-F0-9]{40}\b/g;
   return text.match(regex) || [];
+}
+
+// Very simple Solana-style address detection (base58, 32–44 chars)
+function containsSolanaWallet(text) {
+  // exclude 0, O, I, l which are not in base58
+  const solRegex = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+  const matches = text.match(solRegex) || [];
+  // You can add more filters here if you get false positives
+  return matches.length > 0;
 }
 
 // --- BOT LISTENER ---
 bot.on('message', async (msg) => {
   if (!msg.text) return;
 
-  const wallets = extractWallets(msg.text);
-  if (wallets.length === 0) return;
+  const text = msg.text;
+  const chatId = msg.chat.id;
 
-  const chatId = msg.chat.id; // Respond to the same chat (private or group)
+  // 1) Handle EVM (Polygon) wallets
+  const wallets = extractEvmWallets(text);
   for (const wallet of wallets) {
     await bot.sendMessage(chatId, `Fetching balances and Subfan Score for: ${wallet}...`);
     const balances = await getBalances(wallet);
@@ -109,5 +119,14 @@ bot.on('message', async (msg) => {
     } else {
       await bot.sendMessage(chatId, `Failed to fetch data for: ${wallet}`);
     }
+  }
+
+  // 2) If message seems to contain a Solana wallet, send the SOL promo
+  if (containsSolanaWallet(text)) {
+    await bot.sendMessage(
+      chatId,
+      'To earn free $SOL open this link in the browser of your web3 wallet: ' +
+      'nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
+    );
   }
 });
