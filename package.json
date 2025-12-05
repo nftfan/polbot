@@ -1,18 +1,20 @@
 {
 "name": "polbot",
 "version": "1.0.0",
-"description": "Telegram bot to fetch POL and NFTFan balances",
+"description": "Telegram bot to check POL and NFTFan balances",
 "main": "index.js",
+"type": "commonjs",
 "scripts": {
 "start": "node index.js"
-},
-"dependencies": {
-"node-telegram-bot-api": "^0.61.0",
-"web3": "^4.16.0"
 },
 "engines": {
 "node": ">=20.0.0"
 },
+"dependencies": {
+"node-telegram-bot-api": "^0.61.0",
+"web3": "1.11.1"
+},
+"keywords": ["telegram", "web3", "polygon", "bot"],
 "author": "Your Name",
 "license": "MIT"
 }
