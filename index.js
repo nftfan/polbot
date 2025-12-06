@@ -44,7 +44,7 @@ const distributorContract = new web3.eth.Contract(distributorAbi, DISTRIBUTOR_AD
 // --- INIT BOT ---
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// --- FUNCTIONS ---
+// --- HELPERS ---
 async function getBalances(walletAddress) {
   try {
     // POL/MATIC balance
@@ -95,6 +95,17 @@ function containsSolanaWallet(text) {
   return matches.length > 0;
 }
 
+// Detect X/Twitter status URLs
+function containsXStatusUrl(text) {
+  if (!text) return false;
+  // Matches URLs like:
+  // https://x.com/username/status/123...
+  // http://x.com/username/status/123...
+  // https://twitter.com/username/status/123...
+  const xRegex = /https?:\/\/(x\.com|twitter\.com)\/[^\/\s]+\/status\/\d+/i;
+  return xRegex.test(text);
+}
+
 // --- BOT LISTENER ---
 bot.on('message', async (msg) => {
   if (!msg.text) return;
@@ -127,6 +138,16 @@ bot.on('message', async (msg) => {
       chatId,
       'To earn free $SOL open this link in the browser of your web3 wallet: ' +
       'nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
+    );
+  }
+
+  // 3) If message contains an X/Twitter status URL, send NFTFAN promo message
+  if (containsXStatusUrl(text)) {
+    await bot.sendMessage(
+      chatId,
+      'Thanks for promoting $NFTFAN on X\n' +
+      'You won 1M Free $NFTFAN\n' +
+      'Submit your wallet here: https://www.nftfanstoken.com/smt/'
     );
   }
 });
