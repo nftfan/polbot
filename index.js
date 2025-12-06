@@ -2,32 +2,14 @@ const TelegramBot = require('node-telegram-bot-api');
 const Web3 = require('web3');
 
 // --- CONFIG ---
-// IMPORTANT: Move BOT_TOKEN to Railway variables in production and remove from code.
-const BOT_TOKEN = process.env.BOT_TOKEN || '8206583869:AAHg-L0Atf_Y5zEI8DNFNdR7KIcJfDoDs94';
-const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon-rpc.com/';
-const NFTFAN_TOKEN_ADDRESS = process.env.NFTFAN_TOKEN_ADDRESS || '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
-const DISTRIBUTOR_ADDRESS = process.env.DISTRIBUTOR_ADDRESS || '0x6Ee372b30C73Dd6087ba58F8C4a5Ca77F49BE0b3';
+const BOT_TOKEN = '8206583869:AAHg-L0Atf_Y5zEI8DNfNdR7KIcJfDoDs94';
+const POLYGON_RPC = 'https://polygon-rpc.com/';
+const NFTFAN_TOKEN_ADDRESS = '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
+const DISTRIBUTOR_ADDRESS = '0x6Ee372b30C73Dd6087ba58F8C4a5Ca77F49BE0b3'; // same as in HTML
 
 // --- SETUP WEB3 ---
 const web3 = new Web3(POLYGON_RPC);
 
-// EOA that holds NFTFAN + MATIC (the airdrop wallet)
-let AIRDROP_PRIVATE_KEY = process.env.AIRDROP_PRIVATE_KEY;
-if (!AIRDROP_PRIVATE_KEY) {
-  throw new Error('AIRDROP_PRIVATE_KEY is not set. Please configure it in Railway variables.');
-}
-
-// Ensure 0x prefix
-if (!AIRDROP_PRIVATE_KEY.startsWith('0x')) {
-  AIRDROP_PRIVATE_KEY = '0x' + AIRDROP_PRIVATE_KEY;
-}
-
-const AIRDROP_ADDRESS = web3.eth.accounts.privateKeyToAccount(AIRDROP_PRIVATE_KEY).address;
-
-// amount to send per user (1,000,000 NFTFAN)
-const AIRDROP_AMOUNT_NFTFAN = '1000000';
-
-// --- ABIs ---
 const nftfanAbi = [
   {
     "inputs": [{"internalType":"address","name":"account","type":"address"}],
@@ -41,16 +23,6 @@ const nftfanAbi = [
     "name": "decimals",
     "outputs": [{"internalType":"uint8","name":"","type":"uint8"}],
     "stateMutability":"view",
-    "type":"function"
-  },
-  {
-    "inputs":[
-      {"internalType":"address","name":"recipient","type":"address"},
-      {"internalType":"uint256","name":"amount","type":"uint256"}
-    ],
-    "name":"transfer",
-    "outputs":[{"internalType":"bool","name":"","type":"success"}],
-    "stateMutability":"nonpayable",
     "type":"function"
   }
 ];
@@ -73,31 +45,17 @@ const distributorContract = new web3.eth.Contract(distributorAbi, DISTRIBUTOR_AD
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // --- HELPERS ---
-
-async function getNftfanDecimals() {
-  if (!getNftfanDecimals.cache) {
-    const d = await nftfanContract.methods.decimals().call();
-    getNftfanDecimals.cache = parseInt(d, 10);
-  }
-  return getNftfanDecimals.cache;
-}
-
 async function getBalances(walletAddress) {
   try {
     // POL/MATIC balance
     const polWei = await web3.eth.getBalance(walletAddress);
     const pol = parseFloat(web3.utils.fromWei(polWei, 'ether')).toFixed(4);
 
-    // NFTFAN token balance (human readable, with 4 decimals)
-    const decimals = await getNftfanDecimals();
-    const nftfanRaw = BigInt(await nftfanContract.methods.balanceOf(walletAddress).call());
-    const base = BigInt(10) ** BigInt(decimals);
-    const integerPart = nftfanRaw / base;
-    const fractionalPart = nftfanRaw % base;
-    const fracStr = (fractionalPart * BigInt(10_000) / base)
-      .toString()
-      .padStart(4, '0');
-    const nftfan = `${integerPart.toLocaleString('en-US')}.${fracStr}`;
+    // NFTFAN token balance
+    const decimals = await nftfanContract.methods.decimals().call();
+    const nftfanRaw = await nftfanContract.methods.balanceOf(walletAddress).call();
+    const nftfanBalance = (BigInt(nftfanRaw) * 1000000000000n) / BigInt(10 ** decimals);
+    const nftfan = nftfanBalance.toLocaleString('en-US');
 
     // Subfan score
     let subfanScoreNumber = 0;
@@ -113,6 +71,7 @@ async function getBalances(walletAddress) {
       earningsText = `$${earnings}`;
     } catch (e) {
       console.error('Subfan score fetch error:', e);
+      // keep defaults
     }
 
     return { pol, nftfan, subfanScore: subfanScoreText, earnings: earningsText };
@@ -129,54 +88,22 @@ function extractEvmWallets(text) {
 
 // Very simple Solana-style address detection (base58, 32–44 chars)
 function containsSolanaWallet(text) {
+  // exclude 0, O, I, l which are not in base58
   const solRegex = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
   const matches = text.match(solRegex) || [];
+  // You can add more filters here if you get false positives
   return matches.length > 0;
 }
 
 // Detect X/Twitter status URLs
 function containsXStatusUrl(text) {
   if (!text) return false;
+  // Matches URLs like:
+  // https://x.com/username/status/123...
+  // http://x.com/username/status/123...
+  // https://twitter.com/username/status/123...
   const xRegex = /https?:\/\/(x\.com|twitter\.com)\/[^\/\s]+\/status\/\d+/i;
   return xRegex.test(text);
-}
-
-// Send 1,000,000 NFTFAN to a wallet
-async function sendNftfanAirdrop(toAddress) {
-  try {
-    const decimals = await getNftfanDecimals();
-    const multiplier = BigInt(10) ** BigInt(decimals);
-    const amountWei = (BigInt(AIRDROP_AMOUNT_NFTFAN) * multiplier).toString();
-
-    const nonce = await web3.eth.getTransactionCount(AIRDROP_ADDRESS, 'pending');
-
-    const txData = nftfanContract.methods
-      .transfer(toAddress, amountWei)
-      .encodeABI();
-
-    const gasPrice = await web3.eth.getGasPrice();
-    const gasLimit = await nftfanContract.methods
-      .transfer(toAddress, amountWei)
-      .estimateGas({ from: AIRDROP_ADDRESS });
-
-    const tx = {
-      from: AIRDROP_ADDRESS,
-      to: NFTFAN_TOKEN_ADDRESS,
-      data: txData,
-      gas: gasLimit,
-      gasPrice,
-      nonce,
-      chainId: 137 // Polygon mainnet
-    };
-
-    const signed = await web3.eth.accounts.signTransaction(tx, AIRDROP_PRIVATE_KEY);
-    const receipt = await web3.eth.sendSignedTransaction(signed.rawTransaction);
-
-    return receipt;
-  } catch (err) {
-    console.error('Airdrop error:', err);
-    throw err;
-  }
 }
 
 // --- BOT LISTENER ---
@@ -189,64 +116,19 @@ bot.on('message', async (msg) => {
   // 1) Handle EVM (Polygon) wallets
   const wallets = extractEvmWallets(text);
   for (const wallet of wallets) {
-    const walletChecksum = web3.utils.toChecksumAddress(wallet);
-
-    // Step 1: show initial info
-    await bot.sendMessage(
-      chatId,
-      `👛 Wallet detected: <code>${walletChecksum}</code>\nFetching balances and Subfan Score...`,
-      { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
-    );
-
-    const balances = await getBalances(walletChecksum);
-
-    if (!balances) {
+    await bot.sendMessage(chatId, `Fetching balances and Subfan Score for: ${wallet}...`);
+    const balances = await getBalances(wallet);
+    if (balances) {
       await bot.sendMessage(
         chatId,
-        `⚠️ Failed to fetch data for: <code>${walletChecksum}</code>`,
-        { parse_mode: 'HTML' }
+        `Wallet: ${wallet}\n` +
+        `POL Balance: ${balances.pol} POL\n` +
+        `NFTFan Balance: ${balances.nftfan} NFTFan\n` +
+        `Subfan Score: ${balances.subfanScore}\n` +
+        `Estimated Earnings: ${balances.earnings}`
       );
-      continue;
-    }
-
-    // Step 2: send balances + info
-    await bot.sendMessage(
-      chatId,
-      [
-        `📊 <b>Wallet info</b>`,
-        `Wallet: <code>${walletChecksum}</code>`,
-        `POL Balance: <b>${balances.pol}</b> POL`,
-        `NFTFAN Balance: <b>${balances.nftfan}</b> NFTFAN`,
-        `Subfan Score: <b>${balances.subfanScore}</b>`,
-        `Estimated Earnings: <b>${balances.earnings}</b>`,
-        ``,
-        `Now sending <b>${AIRDROP_AMOUNT_NFTFAN}</b> NFTFAN to this wallet...`
-      ].join('\n'),
-      { parse_mode: 'HTML' }
-    );
-
-    // Step 3: send 1,000,000 NFTFAN
-    try {
-      const receipt = await sendNftfanAirdrop(walletChecksum);
-
-      await bot.sendMessage(
-        chatId,
-        [
-          `✅ <b>Airdrop sent!</b>`,
-          `Sent <b>${AIRDROP_AMOUNT_NFTFAN}</b> NFTFAN to <code>${walletChecksum}</code>`,
-          `Tx hash: <code>${receipt.transactionHash}</code>`,
-          ``,
-          `You can view it on Polygonscan:`,
-          `https://polygonscan.com/tx/${receipt.transactionHash}`
-        ].join('\n'),
-        { parse_mode: 'HTML' }
-      );
-    } catch (err) {
-      await bot.sendMessage(
-        chatId,
-        `❌ Failed to send NFTFAN to <code>${walletChecksum}</code>.\nReason: <code>${err.message || err.toString()}</code>`,
-        { parse_mode: 'HTML' }
-      );
+    } else {
+      await bot.sendMessage(chatId, `Failed to fetch data for: ${wallet}`);
     }
   }
 
@@ -254,7 +136,8 @@ bot.on('message', async (msg) => {
   if (containsSolanaWallet(text)) {
     await bot.sendMessage(
       chatId,
-      'To earn free $SOL open this link in the browser of your web3 wallet: nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
+      'To earn free $SOL open this link in the browser of your web3 wallet: ' +
+      'nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
     );
   }
 
