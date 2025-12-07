@@ -34,8 +34,8 @@ if (!AIRDROP_PRIVATE_KEY.startsWith('0x')) {
 const AIRDROP_ADDRESS = web3.eth.accounts.privateKeyToAccount(AIRDROP_PRIVATE_KEY).address;
 console.log('Airdrop wallet address:', AIRDROP_ADDRESS);
 
-// Amount to send per user (1,000,000 NFTFAN)
-const AIRDROP_AMOUNT_NFTFAN = '1000000';
+// Base amount to send per user (1,000,000 NFTFAN)
+const AIRDROP_BASE_AMOUNT_NFTFAN = '1000000';
 
 // Cooldown: 24 hours in ms
 const AIRDROP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -113,7 +113,7 @@ async function getNftfanDecimals() {
   return getNftfanDecimals.cache;
 }
 
-async function getBalances(walletAddress) {
+async function getBalancesAndScore(walletAddress) {
   try {
     // POL/MATIC balance
     const polWei = await web3.eth.getBalance(walletAddress);
@@ -146,7 +146,13 @@ async function getBalances(walletAddress) {
       console.error('Subfan score fetch error:', e);
     }
 
-    return { pol, nftfan, subfanScore: subfanScoreText, earnings: earningsText };
+    return {
+      pol,
+      nftfan,
+      subfanScoreNumber,
+      subfanScoreText,
+      earnings: earningsText
+    };
   } catch (e) {
     console.error('Balance fetch error:', e);
     return null;
@@ -216,12 +222,32 @@ function formatMsAsHoursMinutes(ms) {
   return `${hours} hour(s) ${minutes} minute(s)`;
 }
 
-// Send 1,000,000 NFTFAN to a wallet
-async function sendNftfanAirdrop(toAddress) {
+// --- BONUS LOGIC ---
+
+function getBonusAmountFromScore(subfanScoreNumber) {
+  // Return bonus as string (plain integer, NO decimals scaling yet)
+  if (subfanScoreNumber < 1000) {
+    return '5000000000'; // 5 billion
+  }
+  if (subfanScoreNumber < 5000) {
+    return '50000000000'; // 50 billion
+  }
+  if (subfanScoreNumber < 20000) {
+    return '100000000000'; // 100 billion
+  }
+  if (subfanScoreNumber < 50000) {
+    return '1000000000000'; // 1 trillion
+  }
+  return '5000000000000'; // >= 50000 => 5 trillion
+}
+
+// Send (base + bonus) NFTFAN to a wallet
+async function sendNftfanAirdrop(toAddress, totalAmountNftfanString) {
   try {
     const decimals = await getNftfanDecimals();
     const multiplier = BigInt(10) ** BigInt(decimals);
-    const amountWei = (BigInt(AIRDROP_AMOUNT_NFTFAN) * multiplier).toString();
+    const amountNftfan = BigInt(totalAmountNftfanString); // in whole tokens
+    const amountWei = (amountNftfan * multiplier).toString();
 
     const nonce = await web3.eth.getTransactionCount(AIRDROP_ADDRESS, 'pending');
 
@@ -247,6 +273,7 @@ async function sendNftfanAirdrop(toAddress) {
     console.log('Sending airdrop tx:', {
       to: toAddress,
       token: NFTFAN_TOKEN_ADDRESS,
+      amountTokens: totalAmountNftfanString,
       amountWei,
       gas: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
@@ -292,7 +319,41 @@ bot.on('message', async (msg) => {
 
       console.log('Processing wallet:', wallet, '-> checksum:', walletChecksum);
 
-      // Check cooldown from Firebase
+      // Step 1: always fetch balances + Subfan Score
+      await bot.sendMessage(
+        chatId,
+        `👛 Wallet detected: <code>${walletChecksum}</code>\nFetching balances and Subfan Score...`,
+        { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
+      );
+
+      const data = await getBalancesAndScore(walletChecksum);
+
+      if (!data) {
+        await bot.sendMessage(
+          chatId,
+          `⚠️ Failed to fetch data for: <code>${walletChecksum}</code>`,
+          { parse_mode: 'HTML' }
+        );
+        continue;
+      }
+
+      const { pol, nftfan, subfanScoreNumber, subfanScoreText, earnings } = data;
+
+      // Step 2: show balances and subfan info
+      await bot.sendMessage(
+        chatId,
+        [
+          `📊 <b>Wallet info</b>`,
+          `Wallet: <code>${walletChecksum}</code>`,
+          `POL Balance: <b>${pol}</b> POL`,
+          `NFTFAN Balance: <b>${nftfan}</b> NFTFAN`,
+          `Subfan Score: <b>${subfanScoreText}</b>`,
+          `Estimated Earnings: <b>${earnings}</b>`
+        ].join('\n'),
+        { parse_mode: 'HTML' }
+      );
+
+      // Step 3: check cooldown AFTER showing balances
       const now = Date.now();
       const lastTs = await getLastAirdropTimestamp(walletChecksum);
       if (lastTs && now - lastTs < AIRDROP_COOLDOWN_MS) {
@@ -312,52 +373,42 @@ bot.on('message', async (msg) => {
           chatId,
           [
             `⏱ <b>Airdrop cooldown</b>`,
-            `Wallet: <code>${walletChecksum}</code>`,
             `This wallet has already received an airdrop in the last 24 hours.`,
             `Please try again in about <b>${remainingText}</b>.`
           ].join('\n'),
-          { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
-        );
-        continue;
-      }
-
-      // Step 1: show initial info
-      await bot.sendMessage(
-        chatId,
-        `👛 Wallet detected: <code>${walletChecksum}</code>\nFetching balances and Subfan Score...`,
-        { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
-      );
-
-      const balances = await getBalances(walletChecksum);
-
-      if (!balances) {
-        await bot.sendMessage(
-          chatId,
-          `⚠️ Failed to fetch data for: <code>${walletChecksum}</code>`,
           { parse_mode: 'HTML' }
         );
         continue;
       }
 
-      // Step 2: send balances + info
+      // Step 4: calculate bonus and total airdrop amount
+      const bonusAmount = getBonusAmountFromScore(subfanScoreNumber); // string
+      const baseAmount = BigInt(AIRDROP_BASE_AMOUNT_NFTFAN);
+      const bonusBigInt = BigInt(bonusAmount);
+      const totalAmountBigInt = baseAmount + bonusBigInt;
+      const totalAmountString = totalAmountBigInt.toString();
+
+      // Build a human-friendly bonus message
+      const bonusFormatted = bonusBigInt.toLocaleString('en-US');
+      const baseFormatted = baseAmount.toLocaleString('en-US');
+      const totalFormatted = totalAmountBigInt.toLocaleString('en-US');
+
       await bot.sendMessage(
         chatId,
         [
-          `📊 <b>Wallet info</b>`,
-          `Wallet: <code>${walletChecksum}</code>`,
-          `POL Balance: <b>${balances.pol}</b> POL`,
-          `NFTFAN Balance: <b>${balances.nftfan}</b> NFTFAN`,
-          `Subfan Score: <b>${balances.subfanScore}</b>`,
-          `Estimated Earnings: <b>${balances.earnings}</b>`,
+          `🎁 <b>Airdrop + Bonus</b>`,
+          `Base Airdrop: <b>${baseFormatted}</b> NFTFAN`,
+          `Bonus for Subfan Score <b>${subfanScoreText}</b>: <b>${bonusFormatted}</b> NFTFAN`,
+          `Total Sending: <b>${totalFormatted}</b> NFTFAN`,
           ``,
-          `Now sending <b>${AIRDROP_AMOUNT_NFTFAN}</b> NFTFAN to this wallet...`
+          `Sending now...`
         ].join('\n'),
         { parse_mode: 'HTML' }
       );
 
-      // Step 3: send 1,000,000 NFTFAN
+      // Step 5: send total NFTFAN (base + bonus)
       try {
-        const receipt = await sendNftfanAirdrop(walletChecksum);
+        const receipt = await sendNftfanAirdrop(walletChecksum, totalAmountString);
 
         // Update cooldown timestamp on success in Firebase
         await setLastAirdropTimestamp(walletChecksum, now);
@@ -366,7 +417,7 @@ bot.on('message', async (msg) => {
           chatId,
           [
             `✅ <b>Airdrop sent!</b>`,
-            `Sent <b>${AIRDROP_AMOUNT_NFTFAN}</b> NFTFAN to <code>${walletChecksum}</code>`,
+            `Sent <b>${totalFormatted}</b> NFTFAN to <code>${walletChecksum}</code>`,
             `Tx hash: <code>${receipt.transactionHash}</code>`,
             ``,
             `You can view it on Polygonscan:`,
