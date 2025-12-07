@@ -11,6 +11,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "firebase": "^11.0.0",
     "node-telegram-bot-api": "^0.61.0",
     "web3": "1.10.4"
   },
