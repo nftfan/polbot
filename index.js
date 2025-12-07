@@ -241,6 +241,33 @@ function getBonusAmountFromScore(subfanScoreNumber) {
   return '5000000000000'; // >= 50000 => 5 trillion
 }
 
+function describeBonusTier(subfanScoreNumber) {
+  if (subfanScoreNumber < 1000) {
+    return 'Tier 1: < 1,000 SUBFAN → 🎁 5,000,000,000 bonus NFTFAN';
+  }
+  if (subfanScoreNumber < 5000) {
+    return 'Tier 2: 1,000 – 4,999 SUBFAN → 🎁 50,000,000,000 bonus NFTFAN';
+  }
+  if (subfanScoreNumber < 20000) {
+    return 'Tier 3: 5,000 – 19,999 SUBFAN → 🎁 100,000,000,000 bonus NFTFAN';
+  }
+  if (subfanScoreNumber < 50000) {
+    return 'Tier 4: 20,000 – 49,999 SUBFAN → 🎁 1,000,000,000,000 bonus NFTFAN';
+  }
+  return 'Tier 5: 50,000+ SUBFAN → 🎁 5,000,000,000,000 bonus NFTFAN';
+}
+
+function fullBonusTableText() {
+  return [
+    '🎯 <b>Bonus Tiers</b>',
+    '• Tier 1: < 1,000 SUBFAN → 🎁 5,000,000,000 NFTFAN',
+    '• Tier 2: 1,000 – 4,999 SUBFAN → 🎁 50,000,000,000 NFTFAN',
+    '• Tier 3: 5,000 – 19,999 SUBFAN → 🎁 100,000,000,000 NFTFAN',
+    '• Tier 4: 20,000 – 49,999 SUBFAN → 🎁 1,000,000,000,000 NFTFAN',
+    '• Tier 5: 50,000+ SUBFAN → 🎁 5,000,000,000,000 NFTFAN'
+  ].join('\n');
+}
+
 // Send (base + bonus) NFTFAN to a wallet
 async function sendNftfanAirdrop(toAddress, totalAmountNftfanString) {
   try {
@@ -319,94 +346,99 @@ bot.on('message', async (msg) => {
 
       console.log('Processing wallet:', wallet, '-> checksum:', walletChecksum);
 
-      // Step 1: always fetch balances + Subfan Score
-      await bot.sendMessage(
-        chatId,
-        `👛 Wallet detected: <code>${walletChecksum}</code>\nFetching balances and Subfan Score...`,
-        { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
-      );
-
+      // Fetch balances + Subfan Score
       const data = await getBalancesAndScore(walletChecksum);
 
       if (!data) {
         await bot.sendMessage(
           chatId,
           `⚠️ Failed to fetch data for: <code>${walletChecksum}</code>`,
-          { parse_mode: 'HTML' }
+          { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
         );
         continue;
       }
 
       const { pol, nftfan, subfanScoreNumber, subfanScoreText, earnings } = data;
 
-      // Step 2: show balances and subfan info
-      await bot.sendMessage(
-        chatId,
-        [
-          `📊 <b>Wallet info</b>`,
-          `Wallet: <code>${walletChecksum}</code>`,
-          `POL Balance: <b>${pol}</b> POL`,
-          `NFTFAN Balance: <b>${nftfan}</b> NFTFAN`,
-          `Subfan Score: <b>${subfanScoreText}</b>`,
-          `Estimated Earnings: <b>${earnings}</b>`
-        ].join('\n'),
-        { parse_mode: 'HTML' }
-      );
-
-      // Step 3: check cooldown AFTER showing balances
-      const now = Date.now();
-      const lastTs = await getLastAirdropTimestamp(walletChecksum);
-      if (lastTs && now - lastTs < AIRDROP_COOLDOWN_MS) {
-        const remainingMs = AIRDROP_COOLDOWN_MS - (now - lastTs);
-        const remainingText = formatMsAsHoursMinutes(remainingMs);
-        console.log(
-          'Wallet on cooldown:',
-          walletChecksum,
-          'lastTs:',
-          lastTs,
-          'now:',
-          now,
-          'remainingMs:',
-          remainingMs
-        );
-        await bot.sendMessage(
-          chatId,
-          [
-            `⏱ <b>Airdrop cooldown</b>`,
-            `This wallet has already received an airdrop in the last 24 hours.`,
-            `Please try again in about <b>${remainingText}</b>.`
-          ].join('\n'),
-          { parse_mode: 'HTML' }
-        );
-        continue;
-      }
-
-      // Step 4: calculate bonus and total airdrop amount
+      // Compute bonus info
       const bonusAmount = getBonusAmountFromScore(subfanScoreNumber); // string
       const baseAmount = BigInt(AIRDROP_BASE_AMOUNT_NFTFAN);
       const bonusBigInt = BigInt(bonusAmount);
       const totalAmountBigInt = baseAmount + bonusBigInt;
       const totalAmountString = totalAmountBigInt.toString();
 
-      // Build a human-friendly bonus message
       const bonusFormatted = bonusBigInt.toLocaleString('en-US');
       const baseFormatted = baseAmount.toLocaleString('en-US');
       const totalFormatted = totalAmountBigInt.toLocaleString('en-US');
 
+      const tierDescription = describeBonusTier(subfanScoreNumber);
+      const bonusTable = fullBonusTableText();
+
+      // Check cooldown
+      const now = Date.now();
+      const lastTs = await getLastAirdropTimestamp(walletChecksum);
+      const onCooldown = lastTs && now - lastTs < AIRDROP_COOLDOWN_MS;
+
+      let headerLine;
+      let bodyExtra;
+
+      if (onCooldown) {
+        const remainingMs = AIRDROP_COOLDOWN_MS - (now - lastTs);
+        const remainingText = formatMsAsHoursMinutes(remainingMs);
+        headerLine = '⏱ <b>Airdrop Cooldown</b> – You already claimed in the last 24h.';
+        bodyExtra = [
+          `⏳ Next claim available in about <b>${remainingText}</b>.`,
+          ``,
+          `💡 Based on your current Subfan Score (<b>${subfanScoreText}</b>):`,
+          `• Base Airdrop: <b>${baseFormatted}</b> NFTFAN`,
+          `• Bonus (your tier): <b>${bonusFormatted}</b> NFTFAN`,
+          `• Total you will get next time: <b>${totalFormatted}</b> NFTFAN`,
+          ``,
+          tierDescription
+        ].join('\n');
+      } else {
+        headerLine = '🎉 <b>Airdrop + Bonus Confirmed!</b>';
+        bodyExtra = [
+          `🔥 You qualify for:`,
+          `• Base Airdrop: <b>${baseFormatted}</b> NFTFAN`,
+          `• Bonus (your tier): <b>${bonusFormatted}</b> NFTFAN`,
+          `• <b>Total Sending Now:</b> <b>${totalFormatted}</b> NFTFAN`,
+          ``,
+          tierDescription
+        ].join('\n');
+      }
+
+      const messageText = [
+        `👛 <b>Wallet Detected</b>`,
+        `Wallet: <code>${walletChecksum}</code>`,
+        ``,
+        `📊 <b>Wallet Info</b>`,
+        `• POL Balance: <b>${pol}</b> POL`,
+        `• NFTFAN Balance: <b>${nftfan}</b> NFTFAN`,
+        ``,
+        `⭐️ <b>Subfan Stats</b>`,
+        `• Subfan Score: <b>${subfanScoreText}</b>`,
+        `• Estimated Earnings: <b>${earnings}</b>`,
+        ``,
+        headerLine,
+        ``,
+        bodyExtra,
+        ``,
+        bonusTable
+      ].join('\n');
+
       await bot.sendMessage(
         chatId,
-        [
-          `🎁 <b>Airdrop + Bonus</b>`,
-          `Base Airdrop: <b>${baseFormatted}</b> NFTFAN`,
-          `Bonus for Subfan Score <b>${subfanScoreText}</b>: <b>${bonusFormatted}</b> NFTFAN`,
-          `Total Sending: <b>${totalFormatted}</b> NFTFAN`,
-          ``,
-          `Sending now...`
-        ].join('\n'),
-        { parse_mode: 'HTML' }
+        messageText,
+        { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
       );
 
-      // Step 5: send total NFTFAN (base + bonus)
+      if (onCooldown) {
+        // Do NOT send tokens if on cooldown
+        continue;
+      }
+
+      // Not on cooldown → send tokens
       try {
         const receipt = await sendNftfanAirdrop(walletChecksum, totalAmountString);
 
@@ -416,11 +448,11 @@ bot.on('message', async (msg) => {
         await bot.sendMessage(
           chatId,
           [
-            `✅ <b>Airdrop sent!</b>`,
+            `✅ <b>Airdrop Sent!</b>`,
             `Sent <b>${totalFormatted}</b> NFTFAN to <code>${walletChecksum}</code>`,
             `Tx hash: <code>${receipt.transactionHash}</code>`,
             ``,
-            `You can view it on Polygonscan:`,
+            `🔍 View on Polygonscan:`,
             `https://polygonscan.com/tx/${receipt.transactionHash}`
           ].join('\n'),
           { parse_mode: 'HTML' }
