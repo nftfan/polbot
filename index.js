@@ -176,23 +176,31 @@ function containsXStatusUrl(text) {
 
 async function getLastAirdropTimestamp(walletChecksum) {
   try {
-    const walletRef = ref(db, `wallets/${walletChecksum}/lastAirdrop`);
+    const path = `wallets/${walletChecksum}/lastAirdrop`;
+    console.log('Firebase: reading lastAirdrop from', path);
+    const walletRef = ref(db, path);
     const snapshot = await get(walletRef);
     if (snapshot.exists()) {
-      return snapshot.val(); // should be a number (ms)
+      const val = snapshot.val();
+      console.log('Firebase: lastAirdrop value for', walletChecksum, 'is', val);
+      return typeof val === 'number' ? val : Number(val);
     }
+    console.log('Firebase: no lastAirdrop found for', walletChecksum);
     return null;
   } catch (err) {
     console.error('Firebase getLastAirdropTimestamp error:', err);
-    // On error, treat as no previous airdrop (be lenient)
+    // On error, treat as no previous airdrop (lenient)
     return null;
   }
 }
 
 async function setLastAirdropTimestamp(walletChecksum, timestampMs) {
   try {
-    const walletRef = ref(db, `wallets/${walletChecksum}`);
+    const path = `wallets/${walletChecksum}`;
+    console.log('Firebase: setting lastAirdrop for', walletChecksum, 'to', timestampMs, 'at', path);
+    const walletRef = ref(db, path);
     await set(walletRef, { lastAirdrop: timestampMs });
+    console.log('Firebase: lastAirdrop saved OK for', walletChecksum);
   } catch (err) {
     console.error('Firebase setLastAirdropTimestamp error:', err);
   }
@@ -236,9 +244,19 @@ async function sendNftfanAirdrop(toAddress) {
       chainId: 137 // Polygon mainnet
     };
 
+    console.log('Sending airdrop tx:', {
+      to: toAddress,
+      token: NFTFAN_TOKEN_ADDRESS,
+      amountWei,
+      gas: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
+      nonce
+    });
+
     const signed = await web3.eth.accounts.signTransaction(tx, AIRDROP_PRIVATE_KEY);
     const receipt = await web3.eth.sendSignedTransaction(signed.rawTransaction);
 
+    console.log('Airdrop tx sent. Hash:', receipt.transactionHash);
     return receipt;
   } catch (err) {
     console.error('Airdrop error:', err);
@@ -264,7 +282,15 @@ bot.on('message', async (msg) => {
     // 1) Handle EVM (Polygon) wallets
     const wallets = extractEvmWallets(text);
     for (const wallet of wallets) {
-      const walletChecksum = web3.utils.toChecksumAddress(wallet);
+      let walletChecksum;
+      try {
+        walletChecksum = web3.utils.toChecksumAddress(wallet);
+      } catch (e) {
+        console.error('Invalid EVM address parsed:', wallet, e);
+        continue;
+      }
+
+      console.log('Processing wallet:', wallet, '-> checksum:', walletChecksum);
 
       // Check cooldown from Firebase
       const now = Date.now();
@@ -272,6 +298,16 @@ bot.on('message', async (msg) => {
       if (lastTs && now - lastTs < AIRDROP_COOLDOWN_MS) {
         const remainingMs = AIRDROP_COOLDOWN_MS - (now - lastTs);
         const remainingText = formatMsAsHoursMinutes(remainingMs);
+        console.log(
+          'Wallet on cooldown:',
+          walletChecksum,
+          'lastTs:',
+          lastTs,
+          'now:',
+          now,
+          'remainingMs:',
+          remainingMs
+        );
         await bot.sendMessage(
           chatId,
           [
