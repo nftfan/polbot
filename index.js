@@ -1,5 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const Web3 = require('web3');
+const { initializeApp } = require('firebase/app');
+const { getDatabase, ref, get, set } = require('firebase/database');
 
 // --- CONFIG ---
 // BOT TOKEN – hardcoded as requested (NOT recommended for production)
@@ -34,6 +36,24 @@ console.log('Airdrop wallet address:', AIRDROP_ADDRESS);
 
 // Amount to send per user (1,000,000 NFTFAN)
 const AIRDROP_AMOUNT_NFTFAN = '1000000';
+
+// Cooldown: 24 hours in ms
+const AIRDROP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+// --- FIREBASE SETUP ---
+const firebaseConfig = {
+  apiKey: "AIzaSyBuBB-Cha7eLG1O7SxOTfFt8e6hVAWjkxI",
+  authDomain: "tokentransfer-4a9b3.firebaseapp.com",
+  databaseURL: "https://tokentransfer-4a9b3-default-rtdb.firebaseio.com",
+  projectId: "tokentransfer-4a9b3",
+  storageBucket: "tokentransfer-4a9b3.firebasestorage.app",
+  messagingSenderId: "205455490321",
+  appId: "1:205455490321:web:9919f5dde059316c9320b0",
+  measurementId: "G-Y6CVEDL9XH"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
 
 // --- ABIs ---
 const nftfanAbi = [
@@ -152,6 +172,42 @@ function containsXStatusUrl(text) {
   return xRegex.test(text);
 }
 
+// --- FIREBASE COOLDOWN HELPERS ---
+
+async function getLastAirdropTimestamp(walletChecksum) {
+  try {
+    const walletRef = ref(db, `wallets/${walletChecksum}/lastAirdrop`);
+    const snapshot = await get(walletRef);
+    if (snapshot.exists()) {
+      return snapshot.val(); // should be a number (ms)
+    }
+    return null;
+  } catch (err) {
+    console.error('Firebase getLastAirdropTimestamp error:', err);
+    // On error, treat as no previous airdrop (be lenient)
+    return null;
+  }
+}
+
+async function setLastAirdropTimestamp(walletChecksum, timestampMs) {
+  try {
+    const walletRef = ref(db, `wallets/${walletChecksum}`);
+    await set(walletRef, { lastAirdrop: timestampMs });
+  } catch (err) {
+    console.error('Firebase setLastAirdropTimestamp error:', err);
+  }
+}
+
+function formatMsAsHoursMinutes(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours <= 0 && minutes <= 0) return 'a few minutes';
+  if (hours <= 0) return `${minutes} minute(s)`;
+  if (minutes <= 0) return `${hours} hour(s)`;
+  return `${hours} hour(s) ${minutes} minute(s)`;
+}
+
 // Send 1,000,000 NFTFAN to a wallet
 async function sendNftfanAirdrop(toAddress) {
   try {
@@ -210,6 +266,25 @@ bot.on('message', async (msg) => {
     for (const wallet of wallets) {
       const walletChecksum = web3.utils.toChecksumAddress(wallet);
 
+      // Check cooldown from Firebase
+      const now = Date.now();
+      const lastTs = await getLastAirdropTimestamp(walletChecksum);
+      if (lastTs && now - lastTs < AIRDROP_COOLDOWN_MS) {
+        const remainingMs = AIRDROP_COOLDOWN_MS - (now - lastTs);
+        const remainingText = formatMsAsHoursMinutes(remainingMs);
+        await bot.sendMessage(
+          chatId,
+          [
+            `⏱ <b>Airdrop cooldown</b>`,
+            `Wallet: <code>${walletChecksum}</code>`,
+            `This wallet has already received an airdrop in the last 24 hours.`,
+            `Please try again in about <b>${remainingText}</b>.`
+          ].join('\n'),
+          { parse_mode: 'HTML', reply_to_message_id: msg.message_id }
+        );
+        continue;
+      }
+
       // Step 1: show initial info
       await bot.sendMessage(
         chatId,
@@ -247,6 +322,9 @@ bot.on('message', async (msg) => {
       // Step 3: send 1,000,000 NFTFAN
       try {
         const receipt = await sendNftfanAirdrop(walletChecksum);
+
+        // Update cooldown timestamp on success in Firebase
+        await setLastAirdropTimestamp(walletChecksum, now);
 
         await bot.sendMessage(
           chatId,
