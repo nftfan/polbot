@@ -7,11 +7,12 @@ const { getDatabase, ref, get, set } = require('firebase/database');
 const BOT_TOKEN = '8206583869:AAHg-L0Atf_Y5zEI8DNfNdR7KIcJfDoDs94';
 const TARGET_CHAT_ID = -1001835894609;
 
-// Your Polygonscan API Key
+// Your Polygonscan API Key (Used for reading balances reliably)
 const POLYGONSCAN_API_KEY = 'Z7UUSFGES3UDZ8RMWVAWF9HA59IAJA83XJ';
 
-// Using Ankr as the fallback RPC for writing transactions (Airdrop)
-const POLYGON_RPC = process.env.POLYGON_RPC || 'https://rpc.ankr.com/polygon';
+// Using dRPC as the fallback RPC for writing transactions (Airdrop)
+// If this ever fails, other good free options are 'https://polygon-bor-rpc.publicnode.com' or 'https://1rpc.io/matic'
+const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon.drpc.org';
 
 const NFTFAN_TOKEN_ADDRESS = process.env.NFTFAN_TOKEN_ADDRESS || '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
 const DISTRIBUTOR_ADDRESS = process.env.DISTRIBUTOR_ADDRESS || '0x6Ee372b30C73Dd6087ba58F8C4a5Ca77F49BE0b3';
@@ -253,14 +254,16 @@ bot.on('message', async (msg) => {
 
     const now = Date.now();
     const lastTs = await getLastAirdropTimestamp(walletChecksum);
+    
+    // Skip cooldown check for testing/debug if needed, but keeping it as requested
     if (lastTs && now - lastTs < AIRDROP_COOLDOWN_MS) {
       const remainingMs = AIRDROP_COOLDOWN_MS - (now - lastTs);
       await bot.sendMessage(
         chatId,
-        `⏱ <b>Airdrop cooldown</b>\nPlease try again in about <b>${formatMsAsHoursMinutes(remainingMs)}</b>.`,
+        `⏱ <b>Airdrop cooldown</b>\nThis wallet already received an airdrop today.\nPlease try again in about <b>${formatMsAsHoursMinutes(remainingMs)}</b>.`,
         { parse_mode: 'HTML' }
       );
-      continue;
+      continue; // Skip the rest of the loop for this wallet
     }
 
     const bonusAmount = getBonusAmountFromScore(subfanScoreNumber);
@@ -282,6 +285,8 @@ bot.on('message', async (msg) => {
 
     try {
       const receipt = await sendNftfanAirdrop(walletChecksum, totalAmountString);
+      
+      // Update firebase only if transaction was successful
       await setLastAirdropTimestamp(walletChecksum, now);
 
       await bot.sendMessage(
@@ -341,4 +346,4 @@ function scheduleRandomCoolMessage() {
 }
 scheduleRandomCoolMessage();
 
-console.log('Bot started. Using Polygonscan API for balances...');
+console.log('Bot started. Using dRPC for transactions and Polygonscan API for balances...');
