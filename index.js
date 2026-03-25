@@ -10,8 +10,9 @@ const BOT_TOKEN = '8206583869:AAHg-L0Atf_Y5zEI8DNfNdR7KIcJfDoDs94';
 // TARGET CHAT ID (your group)
 const TARGET_CHAT_ID = -1001835894609;
 
-// Polygon RPC – you can override with your own RPC in POLYGON_RPC
-const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon-rpc.com/';
+// Polygon RPC – Updated to a more reliable public RPC (LlamaRPC / Ankr)
+// For production, replace this with your own Alchemy/Infura HTTPS endpoint in your ENV variables.
+const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon.llamarpc.com';
 
 // NFTFAN token contract and distributor contract on Polygon
 const NFTFAN_TOKEN_ADDRESS =
