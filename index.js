@@ -10,15 +10,17 @@ const TARGET_CHAT_ID = -1001835894609;
 // Your Polygonscan API Key (Used for reading balances reliably)
 const POLYGONSCAN_API_KEY = 'Z7UUSFGES3UDZ8RMWVAWF9HA59IAJA83XJ';
 
-// Using dRPC as the fallback RPC for writing transactions (Airdrop)
-// If this ever fails, other good free options are 'https://polygon-bor-rpc.publicnode.com' or 'https://1rpc.io/matic'
-const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon.drpc.org';
+// Using a highly reliable public node for writing transactions
+const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon-bor-rpc.publicnode.com';
 
 const NFTFAN_TOKEN_ADDRESS = process.env.NFTFAN_TOKEN_ADDRESS || '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
 const DISTRIBUTOR_ADDRESS = process.env.DISTRIBUTOR_ADDRESS || '0x6Ee372b30C73Dd6087ba58F8C4a5Ca77F49BE0b3';
 
 // --- SETUP WEB3 ---
-const web3 = new Web3(new Web3.providers.HttpProvider(POLYGON_RPC, { timeout: 15000 }));
+// 1. INCREASED TIMEOUT to 60 seconds
+const web3 = new Web3(new Web3.providers.HttpProvider(POLYGON_RPC, { timeout: 60000 }));
+// 2. INCREASED POLLING TIMEOUT so Web3 waits longer for the transaction receipt
+web3.eth.transactionPollingTimeout = 120; // 120 seconds
 
 // --- AIRDROP WALLET SETUP ---
 let AIRDROP_PRIVATE_KEY = process.env.AIRDROP_PRIVATE_KEY;
@@ -196,7 +198,10 @@ async function sendNftfanAirdrop(toAddress, totalAmountNftfanString) {
 
   const nonce = await web3.eth.getTransactionCount(AIRDROP_ADDRESS, 'pending');
   const txData = nftfanContract.methods.transfer(toAddress, amountWei).encodeABI();
-  const gasPrice = await web3.eth.getGasPrice();
+  
+  // 3. INCREASED GAS PRICE by 15% to ensure it mines fast and avoids timeout
+  const baseGasPrice = await web3.eth.getGasPrice();
+  const gasPrice = (BigInt(baseGasPrice) * 115n / 100n).toString(); 
   
   const gasLimit = await nftfanContract.methods.transfer(toAddress, amountWei).estimateGas({ from: AIRDROP_ADDRESS });
 
