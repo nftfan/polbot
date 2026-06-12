@@ -11,7 +11,9 @@ const TARGET_CHAT_ID = -1001835894609;
 const POLYGONSCAN_API_KEY = 'Z7UUSFGES3UDZ8RMWVAWF9HA59IAJA83XJ';
 
 // Using a highly reliable public node for writing transactions
-const POLYGON_RPC = process.env.POLYGON_RPC || 'https://polygon-bor-rpc.publicnode.com';
+const POLYGON_RPC =
+  process.env.POLYGON_RPC ||
+  'https://polygon-mainnet.g.alchemy.com/v2/kYahOHQyfHMEN9y1lAdNX';
 
 const NFTFAN_TOKEN_ADDRESS = process.env.NFTFAN_TOKEN_ADDRESS || '0x2017Fcaea540d2925430586DC92818035Bfc2F50';
 const DISTRIBUTOR_ADDRESS = process.env.DISTRIBUTOR_ADDRESS || '0x6Ee372b30C73Dd6087ba58F8C4a5Ca77F49BE0b3';
